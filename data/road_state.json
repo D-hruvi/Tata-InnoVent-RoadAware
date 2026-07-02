@@ -1,0 +1,30 @@
+{
+  "NH53_Nagpur_Wardha": {
+    "iri_score": 3.0,
+    "condition": "Good",
+    "last_updated": "2026-07-02",
+    "repaired": false,
+    "notes": "NHAI completed resurfacing \u2014 July 2026"
+  },
+  "NH53_Wardha_Chandrapur": {
+    "iri_score": 6.2,
+    "condition": "Fair",
+    "last_updated": "2026-07-01",
+    "repaired": false,
+    "notes": "Moderate wear, speed breakers every 2km"
+  },
+  "NH53_Chandrapur_Raipur": {
+    "iri_score": 4.1,
+    "condition": "Moderate",
+    "last_updated": "2026-07-01",
+    "repaired": false,
+    "notes": "Better surface, some rough patches"
+  },
+  "NH353_Alternate_Full": {
+    "iri_score": 3.8,
+    "condition": "Good",
+    "last_updated": "2026-07-01",
+    "repaired": false,
+    "notes": "Alternate route via NH353 - smoother surface"
+  }
+}
