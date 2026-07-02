@@ -219,3 +219,4 @@ __marimo__/
 data/train_FD001.txt
 data/RUL_FD001.txt
 venv/
+models/rul_model.pkl
