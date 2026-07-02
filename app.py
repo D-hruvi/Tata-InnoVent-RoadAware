@@ -407,9 +407,71 @@ with st.sidebar:
         st.session_state["seed"] = random.randint(0, 10_000)
 
 seed = st.session_state.get("seed", 42)
-segments = build_segments(route_key, seed=seed)
-geojson_data = segments_to_geojson(segments)
+raw_segments = build_segments(route_key, seed=seed)
 route_info = ROUTES[route_key]
+base_rul_days = 90
+repair_cost = 18000
+PER_TRUCK_REPAIR_SAVING = 42000  # fixed pitch-deck figure for the judge demo
+
+# --------------------------------------------------------------------------------
+# JUDGE FEATURE — SIMULATE GOVERNMENT REPAIR OF THE WORST (RED) SEGMENT
+# --------------------------------------------------------------------------------
+# The segment with the highest wear_multiplier stands in for the real-world
+# "Wardha stretch" called out in the pitch. Judges can flip this toggle to see
+# every downstream metric — RUL, wear average, fleet savings — recalculate live.
+worst_raw_segment = max(raw_segments, key=lambda s: s["wear_multiplier"])
+
+
+def apply_repair(segment_list, target_segment_id, repaired):
+    """
+    Return a new list of segments where the target segment's wear_multiplier
+    is reset to a freshly-repaired 1.0x (and its IRI roughness score improved
+    to match) if `repaired` is True. Original list is left untouched.
+    """
+    updated = []
+    for seg in segment_list:
+        seg_copy = dict(seg)
+        if repaired and seg_copy["id"] == target_segment_id:
+            seg_copy["wear_multiplier"] = 1.0
+            seg_copy["iri_score"] = 2.0
+            seg_copy["name"] = seg_copy["name"] + " (Repaired)"
+        updated.append(seg_copy)
+    return updated
+
+
+st.markdown(
+    """
+    <div style="
+        background: linear-gradient(135deg, #241B08 0%, #1A1508 100%);
+        border: 1px solid #6B5320;
+        border-radius: 14px;
+        padding: 16px 20px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    ">
+        <div>
+            <div style="color:#F2C94C;font-weight:800;font-size:14px;letter-spacing:0.4px;">
+                🏆 JUDGE DEMO — GOVERNMENT INTERVENTION SIMULATOR
+            </div>
+            <div style="color:#C9B87A;font-size:12.5px;margin-top:3px;">
+                Simulate a government repair of the worst road segment and watch every metric recompute live.
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+repair_toggle = st.toggle(
+    "🚧 Simulate Government Repair of Wardha Stretch",
+    value=False,
+    help=f"Resets '{worst_raw_segment['name']}' (currently {worst_raw_segment['wear_multiplier']}× wear) to a freshly-paved 1.0× multiplier.",
+)
+
+segments = apply_repair(raw_segments, worst_raw_segment["id"], repair_toggle)
+geojson_data = segments_to_geojson(segments)
 
 # --------------------------------------------------------------------------------
 # HEADER
@@ -417,10 +479,36 @@ route_info = ROUTES[route_key]
 avg_wear = sum(s["wear_multiplier"] for s in segments) / len(segments)
 severe_count = sum(1 for s in segments if s["wear_multiplier"] > 1.8)
 total_km = sum(s["length_km"] for s in segments)
-base_rul_days = 90
 adjusted_rul_days = max(int(base_rul_days / avg_wear), 1)
-repair_cost = 18000
 annual_saving = int(fleet_size * daily_trips * 52 * (repair_cost / max(adjusted_rul_days, 1)) * 0.28)
+
+if repair_toggle:
+    fleet_repair_saving = PER_TRUCK_REPAIR_SAVING * fleet_size
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #163B2A 0%, #0F2A20 100%);
+            border: 1px solid #3CCB7F;
+            border-radius: 14px;
+            padding: 18px 22px;
+            margin-bottom: 18px;
+            box-shadow: 0 0 24px rgba(60,203,127,0.25);
+        ">
+            <div style="font-size:16px;font-weight:800;color:#B7F3CE;">
+                🎉 Wow! If this segment is repaired, your fleet saves an additional
+                Rs. {PER_TRUCK_REPAIR_SAVING:,} per truck annually!
+            </div>
+            <div style="color:#8FE0B4;font-size:13px;margin-top:6px;">
+                For your fleet of {fleet_size} trucks, that's <b>₹{fleet_repair_saving:,}</b> in additional annual
+                savings — on top of the route-optimization savings above. Worst segment
+                <b>{worst_raw_segment['name']}</b> dropped from <b>{worst_raw_segment['wear_multiplier']}×</b> to
+                <b>1.0×</b> wear.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.balloons()
 
 st.markdown(
     f"""
