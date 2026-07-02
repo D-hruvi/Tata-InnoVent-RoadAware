@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+data/train_FD001.txt
+data/RUL_FD001.txt
+venv/
