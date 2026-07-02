@@ -672,7 +672,6 @@ if __name__ == "__main__":
     print(f"  Route B RUL    : {comparison['route_b']['adjusted_rul']} days")
     print(f"  Annual savings : ₹{comparison['rupees_saved_annually']:,} per truck")
     print(f"  Fleet savings  : ₹{comparison['rupees_saved_fleet10']:,} for 10 trucks")
-    print(f"  Model file     : models/rul_model.pkl")
-    print(f"  Road state     : data/road_state.json (live, updateable)")
+  
     print("=" * 60)
     
