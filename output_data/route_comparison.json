@@ -1,0 +1,19 @@
+{
+  "routes": {
+    "Route 1": {
+      "distance_km": 285.0,
+      "duration_min": 224.8,
+      "wear_cost": 523.15
+    },
+    "Route 2": {
+      "distance_km": 322.4,
+      "duration_min": 241.0,
+      "wear_cost": 590.39
+    }
+  },
+  "ranking_by_wear_cost": [
+    "Route 1",
+    "Route 2"
+  ],
+  "recommended_route": "Route 1"
+}
