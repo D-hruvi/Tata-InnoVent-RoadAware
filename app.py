@@ -9,6 +9,7 @@ component wear), and lets a fleet owner compare routes.
 
 import random
 import streamlit as st
+import pandas as pd
 import folium
 from folium import plugins
 from streamlit_folium import st_folium
@@ -149,6 +150,55 @@ st.markdown(
     .ra-route-tag { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
 
     hr { border-color: #202832; }
+
+    /* Big savings callout */
+    .ra-callout {
+        background: radial-gradient(120% 160% at 0% 0%, #163B2A 0%, #0F2A20 45%, #0D1A16 100%);
+        border: 1px solid #2F6B4A;
+        border-radius: 18px;
+        padding: 26px 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        box-shadow: 0 10px 30px rgba(47,107,74,0.18);
+        margin: 6px 0 4px 0;
+    }
+    .ra-callout-label {
+        font-size: 13.5px;
+        font-weight: 700;
+        letter-spacing: 0.6px;
+        text-transform: uppercase;
+        color: #8FE0B4;
+        margin-bottom: 6px;
+    }
+    .ra-callout-value {
+        font-size: 46px;
+        font-weight: 800;
+        color: #F5F7FA;
+        line-height: 1;
+        letter-spacing: -1px;
+    }
+    .ra-callout-sub {
+        color: #9FB3A9;
+        font-size: 13px;
+        margin-top: 8px;
+    }
+    .ra-callout-icon {
+        font-size: 44px;
+        opacity: 0.9;
+    }
+
+    /* Fleet health badges */
+    .ra-health-good { color: #3CCB7F; font-weight: 700; }
+    .ra-health-mid  { color: #F2A93B; font-weight: 700; }
+    .ra-health-bad  { color: #E5484D; font-weight: 700; }
+
+    /* Dataframe container */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #232B36;
+        border-radius: 12px;
+        overflow: hidden;
+    }
 
     /* Slider + selectbox tweaks */
     div[data-baseweb="select"] > div {
@@ -537,43 +587,72 @@ st.markdown(
 )
 
 # --------------------------------------------------------------------------------
-# ROUTE COMPARISON
+# ROUTE COMPARISON MATRIX — Route A vs Route B
 # --------------------------------------------------------------------------------
-st.markdown("<div class='ra-section-title'>🔀 Route Comparison</div>", unsafe_allow_html=True)
+st.markdown("<div class='ra-section-title'>🔀 Route Comparison Matrix</div>", unsafe_allow_html=True)
 
 worst_segment = max(segments, key=lambda s: s["wear_multiplier"])
-route_a_rul = adjusted_rul_days
-route_b_rul = int(adjusted_rul_days * 1.9)
-route_a_cost = repair_cost
-route_b_cost = repair_cost
 
-rc1, rc2 = st.columns(2)
-with rc1:
+# Fixed demo figures (as presented in the pitch deck)
+route_a_rul = 34
+route_a_cost = 18000
+route_b_rul = 67
+route_b_cost = 18000
+route_b_detour_min = 14
+
+col_a, col_b = st.columns(2)
+
+with col_a:
     st.markdown(
         f"""<div class="ra-route-card">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="ra-route-name">Route A — Current ({route_key.split('(')[-1].strip(')')})</span>
+                <span class="ra-route-name">🅰️ Route A — Current ({route_key.split('(')[-1].strip(')')})</span>
                 <span class="ra-route-tag" style="background:#3A1E1E;color:#E5484D;">HIGH WEAR</span>
             </div>
-            <div style="margin-top:12px;color:#C6CDD5;font-size:13.5px;">
-                Predicted suspension failure in <b>{route_a_rul} days</b><br>
-                Estimated repair cost: <b>₹{route_a_cost:,}</b><br>
-                Worst segment: <b>{worst_segment['name']}</b> ({worst_segment['wear_multiplier']}× wear)
+            <hr style="margin:14px 0;border-color:#202832;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Predicted Suspension Failure</span>
+                <span style="color:#F5F7FA;font-weight:700;font-size:14px;">{route_a_rul} days</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Estimated Repair Cost</span>
+                <span style="color:#F5F7FA;font-weight:700;font-size:14px;">₹{route_a_cost:,}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Detour Time</span>
+                <span style="color:#F5F7FA;font-weight:700;font-size:14px;">+0 min (baseline)</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+                <span style="color:#8A97A6;font-size:13px;">Worst Segment</span>
+                <span style="color:#E5484D;font-weight:700;font-size:13.5px;">{worst_segment['name']} ({worst_segment['wear_multiplier']}×)</span>
             </div>
         </div>""",
         unsafe_allow_html=True,
     )
-with rc2:
+
+with col_b:
     st.markdown(
         f"""<div class="ra-route-card best">
             <div style="display:flex;justify-content:space-between;align-items:center;">
-                <span class="ra-route-name">Route B — Alternate (+14 min)</span>
+                <span class="ra-route-name">🅱️ Route B — Alternate (+{route_b_detour_min} min)</span>
                 <span class="ra-route-tag" style="background:#1B4332;color:#6FCF97;">RECOMMENDED</span>
             </div>
-            <div style="margin-top:12px;color:#C6CDD5;font-size:13.5px;">
-                Predicted suspension failure in <b>{route_b_rul} days</b><br>
-                Estimated repair cost: <b>₹{route_b_cost:,}</b><br>
-                Fleet savings: <b style="color:#6FCF97;">₹{annual_saving:,} / year</b> for {fleet_size} trucks
+            <hr style="margin:14px 0;border-color:#202832;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Predicted Suspension Failure</span>
+                <span style="color:#6FCF97;font-weight:700;font-size:14px;">{route_b_rul} days</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Estimated Repair Cost</span>
+                <span style="color:#F5F7FA;font-weight:700;font-size:14px;">₹{route_b_cost:,}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <span style="color:#8A97A6;font-size:13px;">Detour Time</span>
+                <span style="color:#F5F7FA;font-weight:700;font-size:14px;">+{route_b_detour_min} min</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+                <span style="color:#8A97A6;font-size:13px;">Life Extension vs Route A</span>
+                <span style="color:#6FCF97;font-weight:700;font-size:13.5px;">+{route_b_rul - route_a_rul} days ({round((route_b_rul/route_a_rul - 1)*100)}%)</span>
             </div>
         </div>""",
         unsafe_allow_html=True,
@@ -582,4 +661,82 @@ with rc2:
 st.caption(
     "All figures are model-generated estimates for demo purposes, based on mock IRI roughness scores "
     "and a wear-adjusted Remaining Useful Life (RUL) calculation."
+)
+
+# --------------------------------------------------------------------------------
+# BIG METRIC CALLOUT — TOTAL FLEET SAVINGS
+# --------------------------------------------------------------------------------
+st.markdown(
+    f"""
+    <div class="ra-callout">
+        <div>
+            <div class="ra-callout-label">💰 Total Fleet Savings</div>
+            <div class="ra-callout-value">₹2.3 Lakhs <span style="font-size:20px;font-weight:600;color:#9FB3A9;">/ Year</span></div>
+            <div class="ra-callout-sub">Projected for a fleet of {fleet_size} trucks switching from Route A to Route B on this corridor</div>
+        </div>
+        <div class="ra-callout-icon">📈</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --------------------------------------------------------------------------------
+# SIMULATED FLEET TABLE
+# --------------------------------------------------------------------------------
+st.markdown("<div class='ra-section-title'>🚚 Fleet Overview — Live Vehicle Status</div>", unsafe_allow_html=True)
+
+FLEET_SEED = 7
+fleet_rng = random.Random(FLEET_SEED)
+
+truck_models = ["Tata Prima 4025.S", "Tata Signa 3118.T", "Tata LPT 1613", "Tata Ultra T.16", "Tata Prima 2830.K"]
+route_names = list(ROUTES.keys())
+plate_states = ["MH-31", "MH-40", "CG-04", "MH-49", "DL-01", "RJ-14", "MH-12", "CG-15"]
+
+fleet_rows = []
+for i in range(8):
+    state_code = plate_states[i]
+    plate = f"{state_code}-{fleet_rng.randint(1000, 9999)}-{fleet_rng.choice('ABCDEFGH')}{fleet_rng.choice('ABCDEFGH')}"
+    active_route = route_key if i < 5 else fleet_rng.choice(route_names)
+    health_index = round(fleet_rng.uniform(38, 97), 1)
+
+    if health_index >= 75:
+        status = "🟢 Healthy"
+    elif health_index >= 50:
+        status = "🟡 Watch"
+    else:
+        status = "🔴 At Risk"
+
+    recommended = "Route B (Alternate)" if health_index < 65 and active_route == route_key else "Keep Current Route"
+
+    fleet_rows.append(
+        {
+            "License Plate": plate,
+            "Model": fleet_rng.choice(truck_models),
+            "Active Route": active_route,
+            "Health Index": health_index,
+            "Status": status,
+            "Recommended Route": recommended,
+        }
+    )
+
+fleet_df = pd.DataFrame(fleet_rows)
+
+st.dataframe(
+    fleet_df,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Health Index": st.column_config.ProgressColumn(
+            "Health Index",
+            help="Composite vehicle health score (0-100), factoring in road wear exposure",
+            format="%.1f",
+            min_value=0,
+            max_value=100,
+        ),
+    },
+)
+
+st.caption(
+    f"{sum(1 for r in fleet_rows if '🔴' in r['Status'])} truck(s) currently flagged At Risk · "
+    f"{sum(1 for r in fleet_rows if r['Recommended Route'] != 'Keep Current Route')} recommended for route reassignment."
 )
