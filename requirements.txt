@@ -1,13 +1,17 @@
+# --- pinned exactly: rul_model.pkl was serialized with these, and scikit-learn/joblib
+# pickles are version-sensitive, so don't bump these without retraining the model ---
 joblib==1.5.3
-narwhals==2.23.0
-numpy==2.5.0
-pandas==3.0.3
-python-dateutil==2.9.0.post0
 scikit-learn==1.9.0
-scipy==1.18.0
-six==1.17.0
-threadpoolctl==3.6.0
-streamlit
-folium
-streamlit-folium
-plotly
+
+# --- kept flexible so Streamlit Cloud isn't forced onto a same-day bleeding-edge patch ---
+numpy>=1.26,<2.6
+pandas>=2.2,<3.1
+scipy>=1.13,<2
+python-dateutil>=2.9
+six>=1.16
+threadpoolctl>=3.5
+
+streamlit>=1.38,<2
+folium>=0.17,<1
+streamlit-folium>=0.20,<1
+plotly>=5.20,<7

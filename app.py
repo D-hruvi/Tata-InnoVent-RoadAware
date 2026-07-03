@@ -14,6 +14,11 @@ import folium
 from folium import plugins
 from streamlit_folium import st_folium
 
+import ml_engine as ml  # real trained RUL model + live road-state engine
+
+MODEL_PATH = "models/rul_model.pkl"
+LIVE_CORRIDOR_ROUTE = "Nagpur → Raipur (NH53)"  # the only route with real road_state.json data
+
 # --------------------------------------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------------------------------------
@@ -393,14 +398,21 @@ with st.sidebar:
     fleet_size = st.slider("Fleet size (trucks on this route)", 1, 50, 10)
     daily_trips = st.slider("Trips per truck / week", 1, 14, 6)
 
+    st.markdown("<div class='ra-section-title'>🔧 Vehicle Profile</div>", unsafe_allow_html=True)
+    vehicle_age_days = st.slider("Vehicle age (days)", 30, 1500, 365, step=15)
+    load_pct = st.slider("Average load (% of rated capacity)", 40, 130, 80, step=5)
+
     st.markdown("<div class='ra-section-title'>🗺️ Map Layers</div>", unsafe_allow_html=True)
     show_markers = st.checkbox("Show city markers", value=True)
     show_heatmap = st.checkbox("Show wear density heatmap", value=False)
     show_labels = st.checkbox("Show segment tooltips", value=True)
 
     st.markdown("<div class='ra-section-title'>⚙️ Model</div>", unsafe_allow_html=True)
-    st.caption("Base RUL model: Random Forest — NASA C-MAPSS")
-    st.caption("Road data: OSM + PMGSY roughness index")
+    st.caption("Base RUL model: Random Forest — NASA C-MAPSS (live, loaded from models/rul_model.pkl)")
+    if route_key == LIVE_CORRIDOR_ROUTE:
+        st.caption("Road data: LIVE from data/road_state.json")
+    else:
+        st.caption("Road data: demo route — illustrative wear only (live IRI data covers the NH53 corridor)")
 
     st.markdown("---")
     if st.button("🔄 Refresh Wear Scores", use_container_width=True):
@@ -409,16 +421,43 @@ with st.sidebar:
 seed = st.session_state.get("seed", 42)
 raw_segments = build_segments(route_key, seed=seed)
 route_info = ROUTES[route_key]
-base_rul_days = 90
 repair_cost = 18000
-PER_TRUCK_REPAIR_SAVING = 42000  # fixed pitch-deck figure for the judge demo
+IS_LIVE_CORRIDOR = route_key == LIVE_CORRIDOR_ROUTE
+
+# --------------------------------------------------------------------------------
+# LIVE WEAR MULTIPLIERS — from ml_engine + data/road_state.json
+# --------------------------------------------------------------------------------
+# Route A = whatever corridor is selected in the sidebar.
+# Route B = the NH353 alternate — the only real alternate route we have IRI data for.
+# For the NH53 corridor these come straight from live road_state.json. For the two
+# demo routes (no real sensor/IRI data yet) we fall back to the average wear of the
+# mock map segments, clearly labelled as an estimate in the UI below.
+if IS_LIVE_CORRIDOR:
+    live_iri_a, mult_a = ml.get_route_iri("A")
+    live_iri_b, mult_b = ml.get_route_iri("B")
+else:
+    mult_a = round(sum(s["wear_multiplier"] for s in raw_segments) / len(raw_segments), 3)
+    live_iri_a = None
+    live_iri_b, mult_b = ml.get_route_iri("B")
+
+# Real model prediction for the selected route, given the fleet's vehicle profile
+model_result = ml.calculate_adjusted_rul(vehicle_age_days, load_pct, mult_a, model_path=MODEL_PATH)
+base_rul_days = model_result["base_rul"]
+adjusted_rul_days = model_result["adjusted_rul"]
+risk_level = model_result["risk_level"]
+recommendation = model_result["recommendation"]
 
 # --------------------------------------------------------------------------------
 # JUDGE FEATURE — SIMULATE GOVERNMENT REPAIR OF THE WORST (RED) SEGMENT
 # --------------------------------------------------------------------------------
-# The segment with the highest wear_multiplier stands in for the real-world
-# "Wardha stretch" called out in the pitch. Judges can flip this toggle to see
-# every downstream metric — RUL, wear average, fleet savings — recalculate live.
+# Pulls the actual worst segment (highest IRI) from the live road_state.json and
+# runs it through ml.simulate_repair_impact() — the real "what if we repaired this"
+# function from ml_engine.py. Nothing here is a fixed pitch-deck number anymore.
+live_road_state = ml.get_all_segments()
+worst_live_segment_name = max(live_road_state, key=lambda k: live_road_state[k]["iri_score"])
+worst_live_segment = live_road_state[worst_live_segment_name]
+
+# Kept for the cosmetic map coloring only (no real polyline-level IRI dataset exists)
 worst_raw_segment = max(raw_segments, key=lambda s: s["wear_multiplier"])
 
 
@@ -465,11 +504,31 @@ st.markdown(
 )
 
 repair_toggle = st.toggle(
-    "🚧 Simulate Government Repair of Wardha Stretch",
+    f"🚧 Simulate Government Repair of {worst_live_segment_name.replace('_', ' ')}",
     value=False,
-    help=f"Resets '{worst_raw_segment['name']}' (currently {worst_raw_segment['wear_multiplier']}× wear) to a freshly-paved 1.0× multiplier.",
+    help=(
+        f"Runs ml_engine.simulate_repair_impact() on the real trained model: repairs "
+        f"'{worst_live_segment_name}' (currently IRI {worst_live_segment['iri_score']}, "
+        f"{worst_live_segment['condition']}) down to a freshly-paved IRI of 2.5, and "
+        f"recalculates RUL and cost live. Does not permanently change road_state.json."
+    ),
 )
 
+repair_sim = None
+if repair_toggle:
+    repair_sim = ml.simulate_repair_impact(
+        segment_name=worst_live_segment_name,
+        repaired_iri=2.5,
+        vehicle_age_days=vehicle_age_days,
+        load_pct=load_pct,
+        fleet_size=fleet_size,
+    )
+    # If the simulated segment feeds Route A's average IRI (true for the NH53
+    # corridor), reflect the improved RUL in the header metrics below too.
+    if IS_LIVE_CORRIDOR and "error" not in repair_sim:
+        adjusted_rul_days = repair_sim["after"]["route_a_rul"]
+
+# Cosmetic-only: recolor the mock map polylines so the visual matches the toggle
 segments = apply_repair(raw_segments, worst_raw_segment["id"], repair_toggle)
 geojson_data = segments_to_geojson(segments)
 
@@ -479,11 +538,13 @@ geojson_data = segments_to_geojson(segments)
 avg_wear = sum(s["wear_multiplier"] for s in segments) / len(segments)
 severe_count = sum(1 for s in segments if s["wear_multiplier"] > 1.8)
 total_km = sum(s["length_km"] for s in segments)
-adjusted_rul_days = max(int(base_rul_days / avg_wear), 1)
-annual_saving = int(fleet_size * daily_trips * 52 * (repair_cost / max(adjusted_rul_days, 1)) * 0.28)
 
-if repair_toggle:
-    fleet_repair_saving = PER_TRUCK_REPAIR_SAVING * fleet_size
+# Live annual savings from ml_engine's route comparison (see Route Comparison
+# Matrix section below for route_cmp) — used for the fleet callout further down.
+route_cmp = ml.compare_routes(mult_a, mult_b, vehicle_age_days, load_pct)
+annual_saving = route_cmp["rupees_saved_annually"] * fleet_size
+
+if repair_toggle and repair_sim and "error" not in repair_sim:
     st.markdown(
         f"""
         <div style="
@@ -495,14 +556,14 @@ if repair_toggle:
             box-shadow: 0 0 24px rgba(60,203,127,0.25);
         ">
             <div style="font-size:16px;font-weight:800;color:#B7F3CE;">
-                🎉 Wow! If this segment is repaired, your fleet saves an additional
-                Rs. {PER_TRUCK_REPAIR_SAVING:,} per truck annually!
+                🎉 Model result: repairing this segment extends predicted RUL by
+                {repair_sim['rul_gain_days']} days per vehicle.
             </div>
             <div style="color:#8FE0B4;font-size:13px;margin-top:6px;">
-                For your fleet of {fleet_size} trucks, that's <b>₹{fleet_repair_saving:,}</b> in additional annual
-                savings — on top of the route-optimization savings above. Worst segment
-                <b>{worst_raw_segment['name']}</b> dropped from <b>{worst_raw_segment['wear_multiplier']}×</b> to
-                <b>1.0×</b> wear.
+                For your fleet of {fleet_size} trucks, that's <b>₹{repair_sim['extra_savings_fleet']:,}</b>
+                in additional annual savings — on top of the route-optimization savings below.
+                <b>{worst_live_segment_name}</b> improves from IRI
+                <b>{repair_sim['current_iri']}</b> to <b>{repair_sim['repaired_iri']}</b>.
             </div>
         </div>
         """,
@@ -517,7 +578,7 @@ st.markdown(
             <p class="ra-title">Road-Aware Vehicle Maintenance AI</p>
             <p class="ra-subtitle">Live wear intelligence for <b style="color:#C6CDD5;">{route_info['start'][0]} → {route_info['end'][0]}</b> &nbsp;·&nbsp; {len(segments)} segments monitored</p>
         </div>
-        <div class="ra-badge">● LIVE MODEL</div>
+        <div class="ra-badge">● {"LIVE MODEL" if IS_LIVE_CORRIDOR else "DEMO ROUTE"}</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -530,18 +591,18 @@ c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown(
         f"""<div class="ra-card">
-            <div class="ra-card-label">Adjusted RUL</div>
-            <div class="ra-card-value">{adjusted_rul_days} days</div>
-            <div class="ra-card-delta-bad">↓ {base_rul_days - adjusted_rul_days} days vs. baseline</div>
+            <div class="ra-card-label">Adjusted RUL ({risk_level})</div>
+            <div class="ra-card-value">{adjusted_rul_days:.0f} days</div>
+            <div class="ra-card-delta-bad">↓ {base_rul_days - adjusted_rul_days:.0f} days vs. road-agnostic baseline</div>
         </div>""",
         unsafe_allow_html=True,
     )
 with c2:
     st.markdown(
         f"""<div class="ra-card">
-            <div class="ra-card-label">Avg Wear Multiplier</div>
-            <div class="ra-card-value">{avg_wear:.2f}×</div>
-            <div class="ra-card-sub">across {len(segments)} segments · {total_km:.0f} km</div>
+            <div class="ra-card-label">{"Live" if IS_LIVE_CORRIDOR else "Estimated"} Wear Multiplier</div>
+            <div class="ra-card-value">{mult_a:.2f}×</div>
+            <div class="ra-card-sub">map shows {len(segments)} segments · {total_km:.0f} km</div>
         </div>""",
         unsafe_allow_html=True,
     )
@@ -681,12 +742,13 @@ st.markdown("<div class='ra-section-title'>🔀 Route Comparison Matrix</div>", 
 
 worst_segment = max(segments, key=lambda s: s["wear_multiplier"])
 
-# Fixed demo figures (as presented in the pitch deck)
-route_a_rul = 34
-route_a_cost = 18000
-route_b_rul = 67
-route_b_cost = 18000
-route_b_detour_min = 14
+# Live figures from ml.compare_routes() (route_cmp), computed earlier from the
+# real trained model + live road_state.json — no fixed pitch-deck numbers.
+route_a_rul = route_cmp["route_a"]["adjusted_rul"]
+route_a_cost = route_cmp["route_a"]["annual_cost"]
+route_b_rul = route_cmp["route_b"]["adjusted_rul"]
+route_b_cost = route_cmp["route_b"]["annual_cost"]
+route_b_detour_min = 14 if IS_LIVE_CORRIDOR else 0
 
 col_a, col_b = st.columns(2)
 
@@ -746,10 +808,17 @@ with col_b:
         unsafe_allow_html=True,
     )
 
-st.caption(
-    "All figures are model-generated estimates for demo purposes, based on mock IRI roughness scores "
-    "and a wear-adjusted Remaining Useful Life (RUL) calculation."
-)
+if IS_LIVE_CORRIDOR:
+    st.caption(
+        "RUL and cost figures come from a Random Forest model trained on NASA C-MAPSS FD001, "
+        "adjusted using live IRI roughness scores from data/road_state.json for this corridor."
+    )
+else:
+    st.caption(
+        "RUL comes from the trained Random Forest model, but this route's wear multiplier is "
+        "estimated from the illustrative map segments (no live IRI sensor data for this corridor yet). "
+        "Select Nagpur → Raipur (NH53) for fully live-data figures."
+    )
 
 # --------------------------------------------------------------------------------
 # BIG METRIC CALLOUT — TOTAL FLEET SAVINGS
@@ -759,8 +828,8 @@ st.markdown(
     <div class="ra-callout">
         <div>
             <div class="ra-callout-label">💰 Total Fleet Savings</div>
-            <div class="ra-callout-value">₹2.3 Lakhs <span style="font-size:20px;font-weight:600;color:#9FB3A9;">/ Year</span></div>
-            <div class="ra-callout-sub">Projected for a fleet of {fleet_size} trucks switching from Route A to Route B on this corridor</div>
+            <div class="ra-callout-value">₹{annual_saving/100000:.1f} Lakhs <span style="font-size:20px;font-weight:600;color:#9FB3A9;">/ Year</span></div>
+            <div class="ra-callout-sub">Projected for a fleet of {fleet_size} trucks switching from Route A to Route B on this corridor{"" if IS_LIVE_CORRIDOR else " (estimated — select the NH53 route for the live-data figure)"}</div>
         </div>
         <div class="ra-callout-icon">📈</div>
     </div>
