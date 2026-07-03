@@ -354,9 +354,14 @@ def calculate_adjusted_rul(vehicle_age_days: int,
     feature_cols = bundle["feature_cols"]
 
     # Convert vehicle age to cycles (1 cycle ≈ 1 hr, ~8 hrs/day)
-    cycles      = vehicle_age_days * 8
-    degradation = min(cycles / 1000, 1.0)   # 0→1 as vehicle ages
-    load_factor = load_pct / 100.0
+    # NOTE: degradation is scaled against the dashboard's own slider range
+    # (30-1500 days) rather than a fixed 1000-cycle (~125 day) ceiling, so the
+    # "Vehicle age" slider stays responsive across its whole range instead of
+    # flatlining once the truck passes ~125 days old.
+    cycles         = vehicle_age_days * 8
+    MAX_AGE_DAYS   = 1500
+    degradation    = min(cycles / (MAX_AGE_DAYS * 8), 1.0)   # 0→1 across full slider range
+    load_factor    = load_pct / 100.0
 
     # Simulate realistic sensor readings based on age + load
     # These values mimic how C-MAPSS sensors degrade over time
@@ -395,6 +400,19 @@ def calculate_adjusted_rul(vehicle_age_days: int,
     # ── THE CORE INNOVATION ───────────────────────────────────────────────────
     # Adjust for road roughness
     adjusted_rul = base_rul / wear_multiplier
+
+    # ── LOAD PENALTY ─────────────────────────────────────────────────────────
+    # The RF model's sensor-based load signal is real but subtle (it can fall
+    # between tree splits and not move the prediction at all for a given age/
+    # route combo). We layer an explicit, monotonic load penalty on top so the
+    # "Average load" slider always has a guaranteed, visible effect:
+    #   100% load (rated capacity)  → no penalty
+    #   overloading (>100%)         → RUL shortens
+    #   underloading (<100%)        → RUL extends slightly
+    load_penalty = 1.0 + (load_factor - 1.0) * 0.6
+    load_penalty = max(load_penalty, 0.4)   # guard against extreme values
+    adjusted_rul = adjusted_rul / load_penalty
+
     adjusted_rul = max(round(adjusted_rul, 1), 1)
     base_rul     = round(base_rul, 1)
     # ─────────────────────────────────────────────────────────────────────────
@@ -433,14 +451,16 @@ def calculate_adjusted_rul(vehicle_age_days: int,
 def compare_routes(route_a_multiplier: float,
                    route_b_multiplier: float,
                    vehicle_age_days:   int,
-                   load_pct:           float) -> dict:
+                   load_pct:           float,
+                   trips_per_week:     float = 300 / 52) -> dict:
     """
     Compares Route A vs Route B and calculates annual rupee savings.
     Powers Page 4 of the Streamlit dashboard.
 
     Cost assumptions (realistic Indian fleet context):
         ₹18,000 per suspension repair
-        300 trips per year per truck
+        trips_per_week × 52 trips per year per truck (defaults to ~300/yr
+        if the caller doesn't pass a fleet-specific trip frequency)
     """
     result_a = calculate_adjusted_rul(vehicle_age_days, load_pct, route_a_multiplier)
     result_b = calculate_adjusted_rul(vehicle_age_days, load_pct, route_b_multiplier)
@@ -451,8 +471,8 @@ def compare_routes(route_a_multiplier: float,
     days_saved = round(rul_b - rul_a, 1)
 
     # Annual cost calculation
-    cost_per_repair = 18000     # ₹ per suspension repair
-    trips_per_year  = 300       # typical commercial fleet truck
+    cost_per_repair = 18000                    # ₹ per suspension repair
+    trips_per_year  = trips_per_week * 52       # driven by the fleet's actual trip frequency
 
     failures_a    = trips_per_year / max(rul_a, 1)
     failures_b    = trips_per_year / max(rul_b, 1)
@@ -490,7 +510,8 @@ def simulate_repair_impact(segment_name:     str,
                             repaired_iri:     float,
                             vehicle_age_days: int   = 365,
                             load_pct:         float = 80,
-                            fleet_size:       int   = 10) -> dict:
+                            fleet_size:       int   = 10,
+                            trips_per_week:   float = 300 / 52) -> dict:
     """
     THE WOW FEATURE — powers Page 5 (Road Repair Simulator) in the dashboard.
 
@@ -515,7 +536,7 @@ def simulate_repair_impact(segment_name:     str,
     current_avg_iri_A, current_mult_A = get_route_iri("A")
     _, mult_B               = get_route_iri("B")
     current_comparison      = compare_routes(
-        current_mult_A, mult_B, vehicle_age_days, load_pct
+        current_mult_A, mult_B, vehicle_age_days, load_pct, trips_per_week
     )
 
     # ── Simulated situation ───────────────────────────────────────────────────
@@ -526,7 +547,7 @@ def simulate_repair_impact(segment_name:     str,
 
     repaired_avg_iri_A, repaired_mult_A = get_route_iri("A")
     repaired_comparison = compare_routes(
-        repaired_mult_A, mult_B, vehicle_age_days, load_pct
+        repaired_mult_A, mult_B, vehicle_age_days, load_pct, trips_per_week
     )
 
     # ── Restore original state ────────────────────────────────────────────────

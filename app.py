@@ -522,6 +522,7 @@ if repair_toggle:
         vehicle_age_days=vehicle_age_days,
         load_pct=load_pct,
         fleet_size=fleet_size,
+        trips_per_week=daily_trips,
     )
     # If the simulated segment feeds Route A's average IRI (true for the NH53
     # corridor), reflect the improved RUL in the header metrics below too.
@@ -541,7 +542,7 @@ total_km = sum(s["length_km"] for s in segments)
 
 # Live annual savings from ml_engine's route comparison (see Route Comparison
 # Matrix section below for route_cmp) — used for the fleet callout further down.
-route_cmp = ml.compare_routes(mult_a, mult_b, vehicle_age_days, load_pct)
+route_cmp = ml.compare_routes(mult_a, mult_b, vehicle_age_days, load_pct, trips_per_week=daily_trips)
 annual_saving = route_cmp["rupees_saved_annually"] * fleet_size
 
 if repair_toggle and repair_sim and "error" not in repair_sim:
