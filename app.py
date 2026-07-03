@@ -14,7 +14,7 @@ import folium
 from folium import plugins
 from streamlit_folium import st_folium
 
-import ml_engine as ml  # real trained RUL model + live road-state engine
+from components import ml_engine as ml  # real trained RUL model + live road-state engine
 
 MODEL_PATH = "models/rul_model.pkl"
 LIVE_CORRIDOR_ROUTE = "Nagpur → Raipur (NH53)"  # the only route with real road_state.json data
