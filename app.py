@@ -267,6 +267,21 @@ ROUTES = {
     },
 }
 
+ROUTE_B_WAYPOINTS = {
+    # NH353 alternate corridor — the smoother, longer detour around the bad
+    # Nagpur-Wardha stretch. Only real for the live NH53 corridor (this is
+    # the route ml_engine.get_route_iri("B") / NH353_Alternate_Full scores).
+    "Nagpur → Raipur (NH53)": [
+        (21.1458, 79.0882),
+        (21.55, 79.60),
+        (21.65, 80.05),
+        (21.55, 80.45),
+        (21.50, 80.85),
+        (21.40, 81.15),
+        (21.2514, 81.6296),
+    ],
+}
+
 SEGMENT_NAMES = [
     "Toll Plaza Stretch", "Village Bypass", "Highway Straight", "Bridge Crossing",
     "Market Zone Stretch", "Industrial Belt Road", "Hill Curve Section",
@@ -406,6 +421,13 @@ with st.sidebar:
     show_markers = st.checkbox("Show city markers", value=True)
     show_heatmap = st.checkbox("Show wear density heatmap", value=False)
     show_labels = st.checkbox("Show segment tooltips", value=True)
+    show_route_b = st.checkbox(
+        "Show alternate Route B (NH353)",
+        value=True,
+        help="Overlays the smoother NH353 detour used in the Route Comparison "
+             "Matrix and savings numbers below, so you can see the route the "
+             "savings figure is actually comparing against.",
+    )
 
     st.markdown("<div class='ra-section-title'>⚙️ Model</div>", unsafe_allow_html=True)
     st.caption("Base RUL model: Random Forest — NASA C-MAPSS (live, loaded from models/rul_model.pkl)")
@@ -423,6 +445,7 @@ raw_segments = build_segments(route_key, seed=seed)
 route_info = ROUTES[route_key]
 repair_cost = 18000
 IS_LIVE_CORRIDOR = route_key == LIVE_CORRIDOR_ROUTE
+route_b_detour_min = 14 if IS_LIVE_CORRIDOR else 0
 
 # --------------------------------------------------------------------------------
 # LIVE WEAR MULTIPLIERS — from ml_engine + data/road_state.json
@@ -691,6 +714,38 @@ folium.GeoJson(
     tooltip=tooltip,
 ).add_to(fmap)
 
+# --------------------------------------------------------------------------------
+# ALTERNATE ROUTE B (NH353) — the detour that route_cmp / annual_saving actually
+# compare against. Drawn as a dashed line so the savings numbers below have a
+# visible "this is what you'd switch to" reference on the map, not just in text.
+# --------------------------------------------------------------------------------
+route_b_waypoints = ROUTE_B_WAYPOINTS.get(route_key)
+if show_route_b and route_b_waypoints:
+    folium.PolyLine(
+        locations=route_b_waypoints,
+        color="#4FA3F7",
+        weight=5,
+        opacity=0.9,
+        dash_array="12, 10",
+        tooltip=(
+            f"Route B — NH353 Alternate · +{route_b_detour_min} min detour · "
+            f"wear {mult_b:.2f}× (vs {mult_a:.2f}× on Route A)"
+        ),
+    ).add_to(fmap)
+    folium.Marker(
+        location=route_b_waypoints[len(route_b_waypoints) // 2],
+        icon=folium.DivIcon(html=(
+            "<div style='background:#0F2A20;border:1px solid #4FA3F7;"
+            "color:#9CD1FF;font-size:11px;font-weight:700;padding:3px 8px;"
+            "border-radius:6px;white-space:nowrap;'>Route B (NH353)</div>"
+        )),
+    ).add_to(fmap)
+elif show_route_b and not route_b_waypoints:
+    st.caption(
+        "ℹ️ No alternate-route geometry is available for this demo route yet — "
+        "select Nagpur → Raipur (NH53) to see Route B (NH353) plotted on the map."
+    )
+
 # City markers
 if show_markers:
     folium.Marker(
@@ -712,9 +767,13 @@ if show_heatmap:
         heat_points.append([(lat_a + lat_b) / 2, (lon_a + lon_b) / 2, s["wear_multiplier"]])
     plugins.HeatMap(heat_points, radius=22, blur=18, min_opacity=0.35).add_to(fmap)
 
-# Fit bounds to route
-all_lats = [p[0] for w in [route_info["waypoints"]] for p in w]
-all_lons = [p[1] for w in [route_info["waypoints"]] for p in w]
+# Fit bounds to route (include Route B waypoints too, so the alternate
+# detour isn't cropped out of view when it swings wider than Route A)
+bounds_points = list(route_info["waypoints"])
+if show_route_b and route_b_waypoints:
+    bounds_points += route_b_waypoints
+all_lats = [p[0] for p in bounds_points]
+all_lons = [p[1] for p in bounds_points]
 fmap.fit_bounds([[min(all_lats), min(all_lons)], [max(all_lats), max(all_lons)]], padding=(30, 30))
 
 plugins.Fullscreen(position="topright").add_to(fmap)
@@ -731,6 +790,7 @@ st.markdown(
         <span><span class="ra-dot" style="background:#3CCB7F;"></span>Healthy (&lt; 1.2×)</span>
         <span><span class="ra-dot" style="background:#F2A93B;"></span>Moderate (1.2× – 1.8×)</span>
         <span><span class="ra-dot" style="background:#E5484D;"></span>Severe (&gt; 1.8×)</span>
+        {"<span>&nbsp;|&nbsp;<span style='display:inline-block;width:16px;border-top:3px dashed #4FA3F7;margin-right:6px;'></span>Route B — NH353 Alternate</span>" if (show_route_b and route_b_waypoints) else ""}
     </div>
     """,
     unsafe_allow_html=True,
@@ -749,7 +809,6 @@ route_a_rul = route_cmp["route_a"]["adjusted_rul"]
 route_a_cost = route_cmp["route_a"]["annual_cost"]
 route_b_rul = route_cmp["route_b"]["adjusted_rul"]
 route_b_cost = route_cmp["route_b"]["annual_cost"]
-route_b_detour_min = 14 if IS_LIVE_CORRIDOR else 0
 
 col_a, col_b = st.columns(2)
 
