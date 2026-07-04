@@ -461,7 +461,16 @@ if IS_LIVE_CORRIDOR:
 else:
     mult_a = round(sum(s["wear_multiplier"] for s in raw_segments) / len(raw_segments), 3)
     live_iri_a = None
-    live_iri_b, mult_b = ml.get_route_iri("B")
+    # No real alternate-route IRI survey exists for these demo corridors yet.
+    # Comparing them against NH353's fixed multiplier (1.46x) produced a
+    # meaningless ₹0 saving whenever a demo route's own mock average happened
+    # to already be smoother than NH353 (e.g. Mumbai → Pune Expressway).
+    # Instead, model an illustrative "better-maintained alternate" as a fixed
+    # improvement over THIS route's own average wear, so the savings figure
+    # is always meaningful for whichever corridor is selected. Clearly
+    # labelled as an estimate in the caption below.
+    mult_b = round(max(mult_a * 0.80, 1.0), 3)
+    live_iri_b = None
 
 # Real model prediction for the selected route, given the fleet's vehicle profile
 model_result = ml.calculate_adjusted_rul(vehicle_age_days, load_pct, mult_a, model_path=MODEL_PATH)
@@ -515,7 +524,7 @@ st.markdown(
     ">
         <div>
             <div style="color:#F2C94C;font-weight:800;font-size:14px;letter-spacing:0.4px;">
-                🏆 JUDGE DEMO — GOVERNMENT INTERVENTION SIMULATOR
+                🔴 LIVE DEMO — GOVERNMENT INTERVENTION SIMULATOR
             </div>
             <div style="color:#C9B87A;font-size:12.5px;margin-top:3px;">
                 Simulate a government repair of the worst road segment and watch every metric recompute live.
@@ -538,6 +547,7 @@ repair_toggle = st.toggle(
 )
 
 repair_sim = None
+mult_a_pre_repair = mult_a
 if repair_toggle:
     repair_sim = ml.simulate_repair_impact(
         segment_name=worst_live_segment_name,
@@ -547,10 +557,17 @@ if repair_toggle:
         fleet_size=fleet_size,
         trips_per_week=daily_trips,
     )
-    # If the simulated segment feeds Route A's average IRI (true for the NH53
-    # corridor), reflect the improved RUL in the header metrics below too.
+    # Propagate the simulated repair through EVERY downstream metric — wear
+    # multiplier, adjusted RUL, the Route Comparison Matrix, and fleet
+    # savings — instead of only updating the callout banner text. This is
+    # what makes the toggle feel "live" rather than cosmetic.
     if IS_LIVE_CORRIDOR and "error" not in repair_sim:
-        adjusted_rul_days = repair_sim["after"]["route_a_rul"]
+        mult_a = round(1 + 0.12 * repair_sim["after"]["avg_iri_route_a"], 3)
+        model_result = ml.calculate_adjusted_rul(vehicle_age_days, load_pct, mult_a, model_path=MODEL_PATH)
+        base_rul_days = model_result["base_rul"]
+        adjusted_rul_days = model_result["adjusted_rul"]
+        risk_level = model_result["risk_level"]
+        recommendation = model_result["recommendation"]
 
 # Cosmetic-only: recolor the mock map polylines so the visual matches the toggle
 segments = apply_repair(raw_segments, worst_raw_segment["id"], repair_toggle)
@@ -579,21 +596,32 @@ if repair_toggle and repair_sim and "error" not in repair_sim:
             margin-bottom: 18px;
             box-shadow: 0 0 24px rgba(60,203,127,0.25);
         ">
-            <div style="font-size:16px;font-weight:800;color:#B7F3CE;">
-                🎉 Model result: repairing this segment extends predicted RUL by
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="
+                    width:8px;height:8px;border-radius:50%;background:#3CCB7F;
+                    box-shadow:0 0 0 4px rgba(60,203,127,0.18);
+                    display:inline-block;
+                "></span>
+                <span style="font-size:11.5px;font-weight:700;letter-spacing:0.6px;color:#6FCF97;text-transform:uppercase;">
+                    Repair simulation active — all metrics below recomputed live
+                </span>
+            </div>
+            <div style="font-size:16px;font-weight:800;color:#B7F3CE;margin-top:10px;">
+                Repairing {worst_live_segment_name.replace('_', ' ')} extends predicted RUL by
                 {repair_sim['rul_gain_days']} days per vehicle.
             </div>
             <div style="color:#8FE0B4;font-size:13px;margin-top:6px;">
-                For your fleet of {fleet_size} trucks, that's <b>₹{repair_sim['extra_savings_fleet']:,}</b>
-                in additional annual savings — on top of the route-optimization savings below.
-                <b>{worst_live_segment_name}</b> improves from IRI
-                <b>{repair_sim['current_iri']}</b> to <b>{repair_sim['repaired_iri']}</b>.
+                <b>{worst_live_segment_name}</b> improves from IRI <b>{repair_sim['current_iri']}</b>
+                to <b>{repair_sim['repaired_iri']}</b>, lifting the corridor's live wear multiplier from
+                <b>{mult_a_pre_repair:.2f}×</b> to <b>{mult_a:.2f}×</b>. For a fleet of {fleet_size} trucks,
+                this repair alone is worth <b>₹{repair_sim['extra_savings_fleet']:,}/yr</b> — see the updated
+                wear multiplier, RUL, and fleet savings cards below, and the Route Comparison Matrix further down.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.balloons()
+    st.toast(f"Repair simulated — RUL +{repair_sim['rul_gain_days']} days/vehicle", icon="✅")
 
 st.markdown(
     f"""
@@ -602,7 +630,9 @@ st.markdown(
             <p class="ra-title">Road-Aware Vehicle Maintenance AI</p>
             <p class="ra-subtitle">Live wear intelligence for <b style="color:#C6CDD5;">{route_info['start'][0]} → {route_info['end'][0]}</b> &nbsp;·&nbsp; {len(segments)} segments monitored</p>
         </div>
-        <div class="ra-badge">● {"LIVE MODEL" if IS_LIVE_CORRIDOR else "DEMO ROUTE"}</div>
+        <div class="ra-badge" style="{"background:#241B08;color:#F2C94C;border-color:#6B5320;" if (repair_toggle and repair_sim and "error" not in repair_sim) else ""}">
+            ● {"REPAIR SIMULATED" if (repair_toggle and repair_sim and "error" not in repair_sim) else ("LIVE MODEL" if IS_LIVE_CORRIDOR else "DEMO ROUTE")}
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -622,11 +652,17 @@ with c1:
         unsafe_allow_html=True,
     )
 with c2:
+    repair_active = repair_toggle and repair_sim and "error" not in repair_sim
+    wear_delta_html = (
+        f'<div class="ra-card-delta-good">↓ from {mult_a_pre_repair:.2f}× (post-repair)</div>'
+        if repair_active else
+        f'<div class="ra-card-sub">map shows {len(segments)} segments · {total_km:.0f} km</div>'
+    )
     st.markdown(
         f"""<div class="ra-card">
             <div class="ra-card-label">{"Live" if IS_LIVE_CORRIDOR else "Estimated"} Wear Multiplier</div>
             <div class="ra-card-value">{mult_a:.2f}×</div>
-            <div class="ra-card-sub">map shows {len(segments)} segments · {total_km:.0f} km</div>
+            {wear_delta_html}
         </div>""",
         unsafe_allow_html=True,
     )
