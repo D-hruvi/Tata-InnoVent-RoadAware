@@ -4,6 +4,8 @@
 
 An edge AI system that models Indian road quality as a direct input to vehicle maintenance prediction, submitted for the Tata InnoVent Challenge 2026.
 
+🔗 **Live dashboard:** [tata-innovent-roadaware.streamlit.app](https://tata-innovent-roadaware.streamlit.app/)
+
 ## Overview
 
 Predictive maintenance systems typically estimate component wear using vehicle age, mileage, and load, with models trained on Western road data. This approach does not generalize to Indian conditions, where road roughness varies significantly and materially affects wear rates. This project treats road quality as a primary variable rather than a constant, enabling route-specific maintenance predictions and cost-aware routing recommendations.
@@ -29,20 +31,10 @@ The system assigns a wear score to individual road segments and uses it to:
 Route A (NH53 via Wardha): Suspension failure predicted in 34 days. Estimated repair cost: ₹18,000.
 Route B (Alternate, +14 min): Suspension failure predicted in 67 days. Estimated repair cost: ₹18,000.
 
-Recommendation: Route B. For a fleet of 10 trucks on this route daily,
-estimated annual savings: ₹2.3 lakhs.
+Recommendation: Route B. For a fleet of 10 trucks on this route daily, estimated annual savings: ₹2.3 lakhs.
 ```
 
-## System Architecture
-
-| Component | Function |
-|---|---|
-| Road Intelligence Layer | Retrieves road geometry from OpenStreetMap and road quality data from PMGSY; assigns an IRI (International Roughness Index) score to each segment. |
-| Wear Rate Calculator | Converts IRI scores into a wear multiplier using published IRI–wear-rate correlations. |
-| Adjusted RUL Predictor | Adjusts a Remaining Useful Life model (trained on the NASA C-MAPSS dataset) using segment-level wear multipliers. |
-| Route Optimizer | Generates alternate routes via OpenRouteService and ranks them by combined wear cost and time cost. |
-
-## Technology Stack
+## Tech Stack
 
 | Tool | Purpose |
 |---|---|
